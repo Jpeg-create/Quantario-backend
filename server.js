@@ -30,10 +30,10 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 app.get('/', (req, res) => res.json({ message: 'TradeVault API is running.' }));
 
-// Boot: init DB first, then load routes, then start server
 async function start() {
   await initDB();
 
+  app.use('/api/auth',    require('./routes/auth'));
   app.use('/api/trades',  require('./routes/trades'));
   app.use('/api/journal', require('./routes/journal'));
   app.use('/api/import',  require('./routes/import'));

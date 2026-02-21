@@ -2,12 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { dbAll, dbRun, dbGet } = require('../db/database');
+const { requireAuth } = require('../middleware/auth');
+
+// All trade routes require auth
+router.use(requireAuth);
 
 router.get('/', (req, res) => {
   try {
     const { asset_type, direction } = req.query;
-    let query = 'SELECT * FROM trades WHERE 1=1';
-    const params = [];
+    let query = 'SELECT * FROM trades WHERE user_id = ?';
+    const params = [req.user.id];
     if (asset_type && asset_type !== 'all') { query += ' AND asset_type = ?'; params.push(asset_type); }
     if (direction  && direction  !== 'all') { query += ' AND direction = ?';  params.push(direction); }
     query += ' ORDER BY created_at DESC';
@@ -18,7 +22,7 @@ router.get('/', (req, res) => {
 
 router.get('/stats/summary', (req, res) => {
   try {
-    const trades = dbAll('SELECT * FROM trades');
+    const trades = dbAll('SELECT * FROM trades WHERE user_id = ?', [req.user.id]);
     const winning = trades.filter(t => t.pnl > 0);
     const losing  = trades.filter(t => t.pnl < 0);
     const totalPnL    = trades.reduce((s, t) => s + Number(t.pnl), 0);
@@ -39,7 +43,7 @@ router.get('/stats/summary', (req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
-    const trade = dbGet('SELECT * FROM trades WHERE id = ?', [req.params.id]);
+    const trade = dbGet('SELECT * FROM trades WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!trade) return res.status(404).json({ success: false, error: 'Trade not found' });
     res.json({ success: true, data: trade });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -54,10 +58,9 @@ router.post('/', (req, res) => {
       return res.status(400).json({ success: false, error: 'symbol, entry_price, exit_price, quantity required' });
     const pnl = (parseFloat(exit_price)-parseFloat(entry_price))*parseFloat(quantity)*(direction==='short'?-1:1)-parseFloat(commission||0);
     const id = uuidv4();
-    dbRun(`INSERT INTO trades (id,symbol,asset_type,direction,entry_price,exit_price,quantity,entry_date,exit_date,stop_loss,take_profit,strategy,notes,commission,market_conditions,pnl,broker,broker_trade_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id,symbol.toUpperCase(),asset_type,direction,entry_price,exit_price,quantity,entry_date||null,exit_date||null,stop_loss||null,take_profit||null,strategy||null,notes||null,commission,market_conditions||null,parseFloat(pnl.toFixed(8)),broker,broker_trade_id||null]);
-    const trade = dbGet('SELECT * FROM trades WHERE id = ?', [id]);
-    res.status(201).json({ success: true, data: trade });
+    dbRun(`INSERT INTO trades (id,user_id,symbol,asset_type,direction,entry_price,exit_price,quantity,entry_date,exit_date,stop_loss,take_profit,strategy,notes,commission,market_conditions,pnl,broker,broker_trade_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id,req.user.id,symbol.toUpperCase(),asset_type,direction,entry_price,exit_price,quantity,entry_date||null,exit_date||null,stop_loss||null,take_profit||null,strategy||null,notes||null,commission,market_conditions||null,parseFloat(pnl.toFixed(8)),broker,broker_trade_id||null]);
+    res.status(201).json({ success: true, data: dbGet('SELECT * FROM trades WHERE id = ?', [id]) });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
@@ -67,8 +70,8 @@ router.post('/bulk', (req, res) => {
     if (!Array.isArray(trades)||!trades.length) return res.status(400).json({ success: false, error: 'trades array required' });
     trades.forEach(t => {
       const pnl = t.pnl!=null ? t.pnl : (parseFloat(t.exit_price)-parseFloat(t.entry_price))*parseFloat(t.quantity)*(t.direction==='short'?-1:1)-parseFloat(t.commission||0);
-      dbRun(`INSERT OR IGNORE INTO trades (id,symbol,asset_type,direction,entry_price,exit_price,quantity,entry_date,exit_date,stop_loss,take_profit,strategy,notes,commission,market_conditions,pnl,broker,broker_trade_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [t.id||uuidv4(),(t.symbol||'').toUpperCase(),t.asset_type||'stock',t.direction||'long',t.entry_price,t.exit_price,t.quantity,t.entry_date||null,t.exit_date||null,t.stop_loss||null,t.take_profit||null,t.strategy||null,t.notes||null,t.commission||0,t.market_conditions||null,parseFloat(parseFloat(pnl).toFixed(8)),t.broker||'manual',t.broker_trade_id||null]);
+      dbRun(`INSERT OR IGNORE INTO trades (id,user_id,symbol,asset_type,direction,entry_price,exit_price,quantity,entry_date,exit_date,stop_loss,take_profit,strategy,notes,commission,market_conditions,pnl,broker,broker_trade_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [t.id||uuidv4(),req.user.id,(t.symbol||'').toUpperCase(),t.asset_type||'stock',t.direction||'long',t.entry_price,t.exit_price,t.quantity,t.entry_date||null,t.exit_date||null,t.stop_loss||null,t.take_profit||null,t.strategy||null,t.notes||null,t.commission||0,t.market_conditions||null,parseFloat(parseFloat(pnl).toFixed(8)),t.broker||'manual',t.broker_trade_id||null]);
     });
     res.status(201).json({ success: true, inserted: trades.length });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -76,21 +79,21 @@ router.post('/bulk', (req, res) => {
 
 router.put('/:id', (req, res) => {
   try {
-    const existing = dbGet('SELECT * FROM trades WHERE id = ?', [req.params.id]);
+    const existing = dbGet('SELECT * FROM trades WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!existing) return res.status(404).json({ success: false, error: 'Trade not found' });
     const f = { ...existing, ...req.body };
     const pnl = (parseFloat(f.exit_price)-parseFloat(f.entry_price))*parseFloat(f.quantity)*(f.direction==='short'?-1:1)-parseFloat(f.commission||0);
-    dbRun(`UPDATE trades SET symbol=?,asset_type=?,direction=?,entry_price=?,exit_price=?,quantity=?,entry_date=?,exit_date=?,stop_loss=?,take_profit=?,strategy=?,notes=?,commission=?,market_conditions=?,pnl=? WHERE id=?`,
-      [f.symbol,f.asset_type,f.direction,f.entry_price,f.exit_price,f.quantity,f.entry_date,f.exit_date,f.stop_loss,f.take_profit,f.strategy,f.notes,f.commission,f.market_conditions,parseFloat(pnl.toFixed(8)),req.params.id]);
+    dbRun(`UPDATE trades SET symbol=?,asset_type=?,direction=?,entry_price=?,exit_price=?,quantity=?,entry_date=?,exit_date=?,stop_loss=?,take_profit=?,strategy=?,notes=?,commission=?,market_conditions=?,pnl=? WHERE id=? AND user_id=?`,
+      [f.symbol,f.asset_type,f.direction,f.entry_price,f.exit_price,f.quantity,f.entry_date,f.exit_date,f.stop_loss,f.take_profit,f.strategy,f.notes,f.commission,f.market_conditions,parseFloat(pnl.toFixed(8)),req.params.id,req.user.id]);
     res.json({ success: true, data: dbGet('SELECT * FROM trades WHERE id = ?', [req.params.id]) });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 router.delete('/:id', (req, res) => {
   try {
-    const existing = dbGet('SELECT id FROM trades WHERE id = ?', [req.params.id]);
+    const existing = dbGet('SELECT id FROM trades WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!existing) return res.status(404).json({ success: false, error: 'Trade not found' });
-    dbRun('DELETE FROM trades WHERE id = ?', [req.params.id]);
+    dbRun('DELETE FROM trades WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ success: true, message: 'Trade deleted' });
   } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
