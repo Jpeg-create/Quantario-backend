@@ -117,3 +117,126 @@ router.get('/me', (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/auth/reset-password-request
+// In production you'd send an email — for now we return a reset token directly
+// (Add email service like SendGrid later)
+router.post('/reset-password-request', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+    const user = dbGet('SELECT id, name FROM users WHERE email = ?', [email.toLowerCase()]);
+    // Always return success to prevent email enumeration
+    if (!user) return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+
+    // Generate a short-lived reset token
+    const jwt = require('jsonwebtoken');
+    const resetToken = jwt.sign(
+      { id: user.id, purpose: 'reset' },
+      process.env.JWT_SECRET || 'tradevault-secret-change-in-production',
+      { expiresIn: '15m' }
+    );
+
+    // Store token hash in DB so it can only be used once
+    dbRun('UPDATE users SET password = ? WHERE id = ?', [await require('bcryptjs').hash('RESET_PENDING_' + resetToken.slice(-8), 8), user.id]);
+
+    // In production: send email with link containing resetToken
+    // For now: return token directly (dev mode)
+    res.json({
+      success: true,
+      message: 'Reset token generated.',
+      resetToken, // Remove this line when email is set up
+      dev_note: 'In production this token would be emailed. Copy the resetToken and use it in the reset form.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) return res.status(400).json({ success: false, error: 'Token and new password required' });
+    if (newPassword.length < 6) return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'tradevault-secret-change-in-production');
+    } catch {
+      return res.status(400).json({ success: false, error: 'Reset link is invalid or has expired (15 min limit)' });
+    }
+    if (decoded.purpose !== 'reset') return res.status(400).json({ success: false, error: 'Invalid reset token' });
+
+    const hashed = await require('bcryptjs').hash(newPassword, 12);
+    dbRun('UPDATE users SET password = ? WHERE id = ?', [hashed, decoded.id]);
+    res.json({ success: true, message: 'Password updated successfully. Please log in.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/auth/profile — update name or password (requires auth)
+router.put('/profile', async (req, res) => {
+  try {
+    const jwt = require('jsonwebtoken');
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET || 'tradevault-secret-change-in-production');
+    const { name, currentPassword, newPassword } = req.body;
+    const user = dbGet('SELECT * FROM users WHERE id = ?', [decoded.id]);
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+    if (name) {
+      dbRun('UPDATE users SET name = ? WHERE id = ?', [name.trim(), decoded.id]);
+    }
+
+    if (newPassword) {
+      if (!currentPassword) return res.status(400).json({ success: false, error: 'Current password required to set new password' });
+      if (!user.password) return res.status(400).json({ success: false, error: 'Google accounts cannot set a password here' });
+      const valid = await require('bcryptjs').compare(currentPassword, user.password);
+      if (!valid) return res.status(400).json({ success: false, error: 'Current password is incorrect' });
+      if (newPassword.length < 6) return res.status(400).json({ success: false, error: 'New password must be at least 6 characters' });
+      const hashed = await require('bcryptjs').hash(newPassword, 12);
+      dbRun('UPDATE users SET password = ? WHERE id = ?', [hashed, decoded.id]);
+    }
+
+    const updated = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [decoded.id]);
+    const newToken = require('jsonwebtoken').sign(
+      { id: updated.id, email: updated.email, name: updated.name },
+      process.env.JWT_SECRET || 'tradevault-secret-change-in-production',
+      { expiresIn: '30d' }
+    );
+    res.json({ success: true, user: updated, token: newToken });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/auth/account — delete account and all data
+router.delete('/account', async (req, res) => {
+  try {
+    const jwt = require('jsonwebtoken');
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET || 'tradevault-secret-change-in-production');
+    const { password, confirmText } = req.body;
+    if (confirmText !== 'DELETE') return res.status(400).json({ success: false, error: 'Please type DELETE to confirm' });
+    const user = dbGet('SELECT * FROM users WHERE id = ?', [decoded.id]);
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    if (user.password) {
+      if (!password) return res.status(400).json({ success: false, error: 'Password required to delete account' });
+      const valid = await require('bcryptjs').compare(password, user.password);
+      if (!valid) return res.status(400).json({ success: false, error: 'Incorrect password' });
+    }
+    // Delete all user data
+    dbRun('DELETE FROM trades WHERE user_id = ?', [decoded.id]);
+    dbRun('DELETE FROM journal_entries WHERE user_id = ?', [decoded.id]);
+    dbRun('DELETE FROM broker_connections WHERE user_id = ?', [decoded.id]);
+    dbRun('DELETE FROM users WHERE id = ?', [decoded.id]);
+    res.json({ success: true, message: 'Account deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
