@@ -6,18 +6,9 @@ const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const { OAuth2Client } = require('google-auth-library');
 const { dbGet, dbRun } = require('../db/database');
-const { generateToken } = require('../middleware/auth');
+const { generateToken, requireAuth, JWT_SECRET } = require('../middleware/auth');
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-// JWT_SECRET lives in middleware/auth.js — use generateToken() for signing.
-// We import it here only for verifying reset tokens and profile updates.
-const JWT_SECRET = process.env.JWT_SECRET || (() => {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('FATAL: JWT_SECRET not set in production'); process.exit(1);
-  }
-  return 'dev-only-secret-not-for-production';
-})();
 
 
 // Sanitize errors for client — never expose internal details in production
@@ -32,7 +23,7 @@ function safeError(err) {
 //   SMTP_PORT     e.g. 587
 //   SMTP_USER     your Gmail address
 //   SMTP_PASS     your Gmail App Password (not your real password)
-//   SMTP_FROM     e.g. TradeVault <you@gmail.com>
+//   SMTP_FROM     e.g. Quantara <you@gmail.com>
 
 function createMailer() {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
@@ -47,9 +38,66 @@ function createMailer() {
   });
 }
 
+// Verify SMTP connection on startup so misconfiguration fails loudly
+(async () => {
+  const mailer = createMailer();
+  if (!mailer) {
+    console.log('[EMAIL] No SMTP credentials set — email sending disabled. Password reset tokens will be returned in API responses (dev mode).');
+    return;
+  }
+  try {
+    await mailer.verify();
+    console.log(`[EMAIL] SMTP ready — sending from ${process.env.SMTP_FROM || process.env.SMTP_USER}`);
+  } catch (err) {
+    console.error('[EMAIL] SMTP connection failed:', err.message);
+    console.error('[EMAIL] Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in your environment.');
+  }
+})();
+
+async function sendWelcomeEmail(toEmail, toName) {
+  const mailer = createMailer();
+  if (!mailer) return; // silent — no SMTP configured
+
+  const frontendUrl = process.env.FRONTEND_URL || 'https://quantara-frontend.vercel.app';
+  try {
+    await mailer.sendMail({
+      from:    process.env.SMTP_FROM || `Quantara <${process.env.SMTP_USER}>`,
+      to:      `${toName} <${toEmail}>`,
+      subject: 'Welcome to Quantara 🚀',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0a0e14;color:#e8ecf1;border-radius:12px">
+          <h1 style="font-size:24px;margin-bottom:8px;color:#00d4ff">Trade<span style="color:#a3e635">Vault</span></h1>
+          <p style="color:#8a94a6;margin-bottom:24px">Your professional trading journal</p>
+          <p>Hi ${toName},</p>
+          <p>Welcome aboard! Your Quantara account is ready. Start logging your trades, track your performance, and build better trading habits.</p>
+          <div style="background:#111827;border-radius:8px;padding:20px;margin:24px 0;border-left:3px solid #00d4ff">
+            <p style="margin:0 0 8px;font-size:13px;color:#8a94a6;text-transform:uppercase;letter-spacing:.05em">A few things you can do:</p>
+            <ul style="margin:0;padding-left:18px;color:#e8ecf1;line-height:2">
+              <li>Log your first trade</li>
+              <li>Connect a broker for auto-sync</li>
+              <li>Import a CSV of past trades</li>
+              <li>Write your first journal entry</li>
+            </ul>
+          </div>
+          <div style="text-align:center;margin:32px 0">
+            <a href="${frontendUrl}/app"
+               style="background:#00d4ff;color:#0a0e14;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block">
+              Open Quantara
+            </a>
+          </div>
+          <hr style="border:none;border-top:1px solid #2a3140;margin:24px 0">
+          <p style="font-size:12px;color:#8a94a6">You're receiving this because you created an account at Quantara. If this wasn't you, you can safely ignore this email.</p>
+        </div>`,
+    });
+  } catch (err) {
+    // Welcome email is best-effort — never block signup
+    console.error('[EMAIL] Failed to send welcome email to', toEmail, ':', err.message);
+  }
+}
+
 async function sendResetEmail(toEmail, toName, resetToken) {
   const mailer = createMailer();
-  const frontendUrl = process.env.FRONTEND_URL || 'https://tradevault-frontend.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://quantara-frontend.vercel.app';
   const resetLink   = `${frontendUrl}/auth.html?reset=${resetToken}`;
 
   if (!mailer) {
@@ -59,12 +107,12 @@ async function sendResetEmail(toEmail, toName, resetToken) {
   }
 
   await mailer.sendMail({
-    from:    process.env.SMTP_FROM || `TradeVault <${process.env.SMTP_USER}>`,
+    from:    process.env.SMTP_FROM || `Quantara <${process.env.SMTP_USER}>`,
     to:      `${toName} <${toEmail}>`,
-    subject: 'Reset your TradeVault password',
+    subject: 'Reset your Quantara password',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0a0e14;color:#e8ecf1;border-radius:12px">
-        <h1 style="font-size:24px;margin-bottom:8px;color:#00ff88">TradeVault</h1>
+        <h1 style="font-size:24px;margin-bottom:8px;color:#00ff88">Quantara</h1>
         <p style="color:#8a94a6;margin-bottom:24px">Password Reset Request</p>
         <p>Hi ${toName},</p>
         <p>Someone requested a password reset for your account. Click the button below to set a new password. This link expires in <strong>15 minutes</strong>.</p>
@@ -82,13 +130,6 @@ async function sendResetEmail(toEmail, toName, resetToken) {
       </div>`,
   });
   return { sent: true };
-}
-
-// ── HELPER ────────────────────────────────────────────────
-function authUser(req) {
-  const h = req.headers.authorization;
-  if (!h || !h.startsWith('Bearer ')) throw new Error('Not authenticated');
-  return jwt.verify(h.split(' ')[1], JWT_SECRET);
 }
 
 // ── POST /api/auth/signup ─────────────────────────────────
@@ -116,8 +157,12 @@ router.post('/signup', async (req, res) => {
     dbRun('INSERT INTO users (id, name, email, password, created_at) VALUES (?, ?, ?, ?, datetime("now"))',
       [id, name.trim(), email.toLowerCase(), hashed]);
 
-    const user  = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [id]);
+    const user  = dbGet('SELECT id, name, email, avatar, plan, created_at FROM users WHERE id = ?', [id]);
     const token = generateToken(user);
+
+    // Send welcome email — fire-and-forget, never block the signup response
+    sendWelcomeEmail(user.email, user.name);
+
     res.status(201).json({ success: true, token, user });
   } catch (err) {
     res.status(500).json({ success: false, error: safeError(err) });
@@ -163,10 +208,10 @@ router.post('/google', async (req, res) => {
       const id = uuidv4();
       dbRun('INSERT INTO users (id, name, email, google_id, avatar, created_at) VALUES (?, ?, ?, ?, ?, datetime("now"))',
         [id, name, email.toLowerCase(), googleId, picture || null]);
-      user = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [id]);
+      user = dbGet('SELECT id, name, email, avatar, plan, created_at FROM users WHERE id = ?', [id]);
     } else {
       dbRun('UPDATE users SET google_id = ?, avatar = ? WHERE id = ?', [googleId, picture || user.avatar, user.id]);
-      user = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [user.id]);
+      user = dbGet('SELECT id, name, email, avatar, plan, created_at FROM users WHERE id = ?', [user.id]);
     }
 
     const token = generateToken(user);
@@ -177,14 +222,13 @@ router.post('/google', async (req, res) => {
 });
 
 // ── GET /api/auth/me ──────────────────────────────────────
-router.get('/me', (req, res) => {
+router.get('/me', requireAuth, (req, res) => {
   try {
-    const decoded = authUser(req);
-    const user    = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [decoded.id]);
+    const user = dbGet('SELECT id, name, email, avatar, plan, created_at FROM users WHERE id = ?', [req.user.id]);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
     res.json({ success: true, user });
   } catch (err) {
-    res.status(401).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: safeError(err) });
   }
 });
 
@@ -199,10 +243,17 @@ router.post('/reset-password-request', async (req, res) => {
     if (!user) return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
 
     const resetToken = jwt.sign({ id: user.id, purpose: 'reset' }, JWT_SECRET, { expiresIn: '15m' });
-    const result     = await sendResetEmail(email.toLowerCase(), user.name, resetToken);
+    const result = await sendResetEmail(email.toLowerCase(), user.name, resetToken);
 
-    if (result.devToken) {
-      // No email configured — return token so user can still reset
+    if (result?.devToken) {
+      // No email configured AND not in production — return token for local dev/testing
+      if (process.env.NODE_ENV === 'production') {
+        // In production without SMTP, fail explicitly rather than leaking a token
+        return res.status(500).json({
+          success: false,
+          error: 'Email service is not configured. Please contact support to reset your password.',
+        });
+      }
       return res.json({
         success: true,
         message: 'No email service configured. Copy the token below and paste it in the Reset Password form.',
@@ -237,8 +288,22 @@ router.post('/reset-password', async (req, res) => {
     if (decoded.purpose !== 'reset')
       return res.status(400).json({ success: false, error: 'Invalid reset token' });
 
+    // Enforce single-use: hash the token and check if it's already been used
+    const crypto = require('crypto');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const alreadyUsed = dbGet('SELECT token_hash FROM used_reset_tokens WHERE token_hash = ?', [tokenHash]);
+    if (alreadyUsed)
+      return res.status(400).json({ success: false, error: 'Reset link has already been used. Please request a new one.' });
+
+    // Mark token as used before updating password
+    dbRun('INSERT INTO used_reset_tokens (token_hash) VALUES (?)', [tokenHash]);
+
     const hashed = await bcrypt.hash(newPassword, 12);
     dbRun('UPDATE users SET password = ? WHERE id = ?', [hashed, decoded.id]);
+
+    // Clean up expired used tokens (older than 15 min) to prevent table bloat
+    dbRun("DELETE FROM used_reset_tokens WHERE used_at < datetime('now', '-15 minutes')");
+
     res.json({ success: true, message: 'Password updated! You can now log in.' });
   } catch (err) {
     res.status(500).json({ success: false, error: safeError(err) });
@@ -246,15 +311,14 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // ── PUT /api/auth/profile ─────────────────────────────────
-router.put('/profile', async (req, res) => {
+router.put('/profile', requireAuth, async (req, res) => {
   try {
-    const decoded = authUser(req);
     const { name, currentPassword, newPassword } = req.body;
-    const user = dbGet('SELECT * FROM users WHERE id = ?', [decoded.id]);
+    const user = dbGet('SELECT * FROM users WHERE id = ?', [req.user.id]);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     if (name && name.trim()) {
-      dbRun('UPDATE users SET name = ? WHERE id = ?', [name.trim(), decoded.id]);
+      dbRun('UPDATE users SET name = ? WHERE id = ?', [name.trim(), req.user.id]);
     }
     if (newPassword) {
       if (!currentPassword)
@@ -267,11 +331,11 @@ router.put('/profile', async (req, res) => {
       if (newPassword.length < 6)
         return res.status(400).json({ success: false, error: 'New password must be at least 6 characters' });
       const hashed = await bcrypt.hash(newPassword, 12);
-      dbRun('UPDATE users SET password = ? WHERE id = ?', [hashed, decoded.id]);
+      dbRun('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
     }
 
-    const updated  = dbGet('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [decoded.id]);
-    const newToken = jwt.sign({ id: updated.id, email: updated.email, name: updated.name }, JWT_SECRET, { expiresIn: '30d' });
+    const updated  = dbGet('SELECT id, name, email, avatar, plan, created_at FROM users WHERE id = ?', [req.user.id]);
+    const newToken = generateToken(updated);
     res.json({ success: true, user: updated, token: newToken });
   } catch (err) {
     res.status(500).json({ success: false, error: safeError(err) });
@@ -279,14 +343,13 @@ router.put('/profile', async (req, res) => {
 });
 
 // ── DELETE /api/auth/account ──────────────────────────────
-router.delete('/account', async (req, res) => {
+router.delete('/account', requireAuth, async (req, res) => {
   try {
-    const decoded = authUser(req);
     const { password, confirmText } = req.body;
     if (confirmText !== 'DELETE')
       return res.status(400).json({ success: false, error: 'Please type DELETE to confirm' });
 
-    const user = dbGet('SELECT * FROM users WHERE id = ?', [decoded.id]);
+    const user = dbGet('SELECT * FROM users WHERE id = ?', [req.user.id]);
     if (!user) return res.status(404).json({ success: false, error: 'User not found' });
 
     if (user.password) {
@@ -297,10 +360,10 @@ router.delete('/account', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Incorrect password' });
     }
 
-    dbRun('DELETE FROM trades              WHERE user_id = ?', [decoded.id]);
-    dbRun('DELETE FROM journal_entries     WHERE user_id = ?', [decoded.id]);
-    dbRun('DELETE FROM broker_connections  WHERE user_id = ?', [decoded.id]);
-    dbRun('DELETE FROM users               WHERE id = ?',      [decoded.id]);
+    dbRun('DELETE FROM trades              WHERE user_id = ?', [req.user.id]);
+    dbRun('DELETE FROM journal_entries     WHERE user_id = ?', [req.user.id]);
+    dbRun('DELETE FROM broker_connections  WHERE user_id = ?', [req.user.id]);
+    dbRun('DELETE FROM users               WHERE id = ?',      [req.user.id]);
     res.json({ success: true, message: 'Account deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: safeError(err) });

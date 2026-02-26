@@ -19,7 +19,10 @@ const upload = multer({
   dest: uploadDir,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
   fileFilter: (req, file, cb) => {
-    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+    // Check both extension AND MIME type
+    const validExt  = file.originalname.toLowerCase().endsWith('.csv');
+    const validMime = ['text/csv', 'text/plain', 'application/csv', 'application/vnd.ms-excel'].includes(file.mimetype);
+    if (!validExt || !validMime) {
       const err = new Error('Only CSV files are allowed');
       err.status = 400;
       return cb(err);
@@ -66,7 +69,8 @@ function parseCSVText(text) {
   if (lines.length > MAX_ROWS + 1)
     throw new Error(`CSV has too many rows (max ${MAX_ROWS}). Split into smaller files.`);
 
-  const headers = lines[0].split(',').map(h => {
+  // Use parseCSVLine for headers too — handles quoted headers with commas
+  const headers = parseCSVLine(lines[0]).map(h => {
     const k = h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '');
     return ALIASES[k] || k;
   });
@@ -187,7 +191,7 @@ router.get('/sample', (req, res) => {
     'EUR/USD,forex,short,1.0850,1.0790,10000,2025-01-11,2025-01-11,Trend,0.00',
   ].join('\n');
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="tradevault-sample.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="quantara-sample.csv"');
   res.send(csv);
 });
 

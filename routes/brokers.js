@@ -32,6 +32,8 @@ router.post('/', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   try {
+    const existing = dbGet('SELECT id FROM broker_connections WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    if (!existing) return res.status(404).json({ success: false, error: 'Broker connection not found' });
     dbRun('DELETE FROM broker_connections WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ success: false, error: safeErr(err) }); }

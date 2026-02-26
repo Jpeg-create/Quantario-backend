@@ -5,7 +5,7 @@ const fs = require('fs');
 const dataDir = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-const dbPath = path.join(dataDir, 'tradevault.db');
+const dbPath = path.join(dataDir, 'quantara.db');
 let db;
 
 async function initDB() {
@@ -29,6 +29,7 @@ async function initDB() {
       password   TEXT,
       google_id  TEXT UNIQUE,
       avatar     TEXT,
+      plan       TEXT DEFAULT 'free',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -77,9 +78,18 @@ async function initDB() {
       created_at  TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS used_reset_tokens (
+      token_hash TEXT PRIMARY KEY,
+      used_at    TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   db.save();
+
+  // Migration: add plan column if it doesn't exist (existing databases)
+  try { db.run(`ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'`); db.save(); } catch {}
+
   console.log('✅ Database ready:', dbPath);
   return db;
 }

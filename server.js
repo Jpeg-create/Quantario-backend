@@ -14,6 +14,20 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ── SECURITY HEADERS ───────────────────────────────────────
+// Applied before all other middleware so every response gets them.
+app.disable('x-powered-by'); // don't leak Express version
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options',  'nosniff');
+  res.setHeader('X-Frame-Options',         'DENY');
+  res.setHeader('Referrer-Policy',         'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy',      'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
 // ── CORS ──────────────────────────────────────────────────
 const allowedOrigins = [
   process.env.FRONTEND_URL,
@@ -61,7 +75,7 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ── HEALTH ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-app.get('/',           (req, res) => res.json({ message: 'TradeVault API is running.' }));
+app.get('/',           (req, res) => res.json({ message: 'Quantara API is running.' }));
 
 // ── START ──────────────────────────────────────────────────
 async function start() {
@@ -72,11 +86,12 @@ async function start() {
   app.use('/api/journal', require('./routes/journal'));
   app.use('/api/import',  require('./routes/import'));
   app.use('/api/brokers', require('./routes/brokers'));
+  app.use('/api/ai',      require('./routes/ai'));
 
   app.use(errorHandler);
 
   app.listen(PORT, () => {
-    console.log(`\n🚀 TradeVault API running on http://localhost:${PORT}`);
+    console.log(`\n🚀 Quantara API running on http://localhost:${PORT}`);
     console.log(`❤️  Health: http://localhost:${PORT}/api/health\n`);
   });
 }
