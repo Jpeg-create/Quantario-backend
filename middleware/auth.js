@@ -34,7 +34,7 @@ function requirePremium(req, res, next) {
   if (req.user.plan !== 'premium') {
     return res.status(403).json({
       success: false,
-      error: 'This feature requires a Quantara Premium plan.',
+      error: 'This feature requires a Quantario Premium plan.',
       upgrade: true,
     });
   }

@@ -23,7 +23,7 @@ function safeError(err) {
 //   SMTP_PORT     e.g. 587
 //   SMTP_USER     your Gmail address
 //   SMTP_PASS     your Gmail App Password (not your real password)
-//   SMTP_FROM     e.g. Quantara <you@gmail.com>
+//   SMTP_FROM     e.g. Quantario <you@gmail.com>
 
 function createMailer() {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
@@ -58,18 +58,18 @@ async function sendWelcomeEmail(toEmail, toName) {
   const mailer = createMailer();
   if (!mailer) return; // silent — no SMTP configured
 
-  const frontendUrl = process.env.FRONTEND_URL || 'https://quantara-frontend.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://quantario-frontend.vercel.app';
   try {
     await mailer.sendMail({
-      from:    process.env.SMTP_FROM || `Quantara <${process.env.SMTP_USER}>`,
+      from:    process.env.SMTP_FROM || `Quantario <${process.env.SMTP_USER}>`,
       to:      `${toName} <${toEmail}>`,
-      subject: 'Welcome to Quantara 🚀',
+      subject: 'Welcome to Quantario 🚀',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0a0e14;color:#e8ecf1;border-radius:12px">
-          <h1 style="font-size:24px;margin-bottom:8px;color:#00d4ff">Trade<span style="color:#a3e635">Vault</span></h1>
+          <h1 style="font-size:24px;margin-bottom:8px;color:#00d4ff">Quan<span style="color:#a3e635">tario</span></h1>
           <p style="color:#8a94a6;margin-bottom:24px">Your professional trading journal</p>
           <p>Hi ${toName},</p>
-          <p>Welcome aboard! Your Quantara account is ready. Start logging your trades, track your performance, and build better trading habits.</p>
+          <p>Welcome aboard! Your Quantario account is ready. Start logging your trades, track your performance, and build better trading habits.</p>
           <div style="background:#111827;border-radius:8px;padding:20px;margin:24px 0;border-left:3px solid #00d4ff">
             <p style="margin:0 0 8px;font-size:13px;color:#8a94a6;text-transform:uppercase;letter-spacing:.05em">A few things you can do:</p>
             <ul style="margin:0;padding-left:18px;color:#e8ecf1;line-height:2">
@@ -82,11 +82,11 @@ async function sendWelcomeEmail(toEmail, toName) {
           <div style="text-align:center;margin:32px 0">
             <a href="${frontendUrl}/app"
                style="background:#00d4ff;color:#0a0e14;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block">
-              Open Quantara
+              Open Quantario
             </a>
           </div>
           <hr style="border:none;border-top:1px solid #2a3140;margin:24px 0">
-          <p style="font-size:12px;color:#8a94a6">You're receiving this because you created an account at Quantara. If this wasn't you, you can safely ignore this email.</p>
+          <p style="font-size:12px;color:#8a94a6">You're receiving this because you created an account at Quantario. If this wasn't you, you can safely ignore this email.</p>
         </div>`,
     });
   } catch (err) {
@@ -97,7 +97,7 @@ async function sendWelcomeEmail(toEmail, toName) {
 
 async function sendResetEmail(toEmail, toName, resetToken) {
   const mailer = createMailer();
-  const frontendUrl = process.env.FRONTEND_URL || 'https://quantara-frontend.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://quantario-frontend.vercel.app';
   const resetLink   = `${frontendUrl}/auth.html?reset=${resetToken}`;
 
   if (!mailer) {
@@ -107,12 +107,12 @@ async function sendResetEmail(toEmail, toName, resetToken) {
   }
 
   await mailer.sendMail({
-    from:    process.env.SMTP_FROM || `Quantara <${process.env.SMTP_USER}>`,
+    from:    process.env.SMTP_FROM || `Quantario <${process.env.SMTP_USER}>`,
     to:      `${toName} <${toEmail}>`,
-    subject: 'Reset your Quantara password',
+    subject: 'Reset your Quantario password',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0a0e14;color:#e8ecf1;border-radius:12px">
-        <h1 style="font-size:24px;margin-bottom:8px;color:#00ff88">Quantara</h1>
+        <h1 style="font-size:24px;margin-bottom:8px;color:#00ff88">Quantario</h1>
         <p style="color:#8a94a6;margin-bottom:24px">Password Reset Request</p>
         <p>Hi ${toName},</p>
         <p>Someone requested a password reset for your account. Click the button below to set a new password. This link expires in <strong>15 minutes</strong>.</p>

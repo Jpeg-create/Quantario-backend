@@ -75,7 +75,7 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ── HEALTH ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-app.get('/',           (req, res) => res.json({ message: 'Quantara API is running.' }));
+app.get('/',           (req, res) => res.json({ message: 'Quantario API is running.' }));
 
 // ── START ──────────────────────────────────────────────────
 async function start() {
@@ -91,7 +91,7 @@ async function start() {
   app.use(errorHandler);
 
   app.listen(PORT, () => {
-    console.log(`\n🚀 Quantara API running on http://localhost:${PORT}`);
+    console.log(`\n🚀 Quantario API running on http://localhost:${PORT}`);
     console.log(`❤️  Health: http://localhost:${PORT}/api/health\n`);
   });
 }

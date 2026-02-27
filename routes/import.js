@@ -191,7 +191,7 @@ router.get('/sample', (req, res) => {
     'EUR/USD,forex,short,1.0850,1.0790,10000,2025-01-11,2025-01-11,Trend,0.00',
   ].join('\n');
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="quantara-sample.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="quantario-sample.csv"');
   res.send(csv);
 });
 

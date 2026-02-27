@@ -1,7 +1,7 @@
 {
-  "name": "quantara-backend",
+  "name": "quantario-backend",
   "version": "1.0.0",
-  "description": "Quantara Trading Journal - REST API",
+  "description": "Quantario Trading Journal - REST API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
